@@ -87,3 +87,5 @@ There is no build step and no dependencies. It is plain HTML, CSS and ES modules
 ## Privacy
 
 Files are read, compressed and downloaded entirely inside your browser tab (including PDFs: the PDF libraries are bundled in `vendor/`, not fetched from a CDN). Nothing is sent to a server, and closing the tab clears everything from memory. The only thing hosted is the static app itself.
+
+The deployed site also uses Vercel Web Analytics, which counts page views only (no cookies, nothing about your files). It is a single script tag in `index.html`; delete it to run with no analytics at all. Locally it simply 404s and does nothing.
