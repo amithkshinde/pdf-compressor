@@ -8,21 +8,26 @@
 </head>
 <body>
   <main>
+    <div class="top">
+      <div class="brand"><span class="logo" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h5V4"/><path d="M9 9 3 3"/><path d="M20 15h-5v5"/><path d="m15 15 6 6"/></svg></span>Fit to size</div>
+      <div class="pill"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>Stays on your device</div>
+    </div>
     <header>
-      <h1>Fit to size</h1>
-      <p>Shrink a PDF or image to the size a portal asks for. It runs in your browser: your file is never uploaded or stored.</p>
+      <h1>Make any file fit the upload limit</h1>
+      <p>Choose a PDF or photo, type the size your portal allows, and we shrink it to fit. Nothing is uploaded or stored.</p>
     </header>
 
     <section class="card">
+      <h2><span class="step">1</span>Choose your file</h2>
       <label class="drop" id="drop">
         <input type="file" id="file" accept="image/jpeg,image/png,image/webp,application/pdf,.pdf">
-        <span id="drop-text">Choose or drop a file (PDF, JPG, PNG, WEBP)</span>
+        <span id="drop-text">Tap to choose a file</span>
       </label>
       <p class="muted" id="file-info" hidden></p>
     </section>
 
     <section class="card" id="target-card" hidden>
-      <h2>Target size</h2>
+      <h2><span class="step">2</span>How big can it be?</h2>
       <div class="row">
         <input type="number" id="target" min="1" step="any" inputmode="decimal" placeholder="200" aria-label="Maximum size">
         <select id="unit" aria-label="Unit"><option>KB</option><option>MB</option></select>
@@ -41,7 +46,7 @@
           <span class="muted">same unit</span>
         </div>
       </details>
-      <button id="go" class="primary" type="button">Compress</button>
+      <button id="go" class="primary" type="button">Make it fit</button>
     </section>
 
     <section class="card" id="result" hidden aria-live="polite">
@@ -62,7 +67,7 @@
       </div>
     </section>
 
-    <footer class="muted">No uploads. No account. No file storage.</footer>
+    <footer class="muted">No upload · No account · Nothing stored</footer>
   </main>
   <script type="module" src="src/app.js"></script>
 </body>

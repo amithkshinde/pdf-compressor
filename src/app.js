@@ -86,7 +86,7 @@ function busy(on, label) {
   const btn = $("go");
   btn.disabled = on;
   $("flatten").disabled = on;
-  btn.textContent = on ? label || "Optimising…" : "Compress";
+  btn.textContent = on ? label || "Optimising…" : "Make it fit";
 }
 
 async function run() {
