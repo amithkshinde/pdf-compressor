@@ -12,7 +12,7 @@ const pct = (x) => `${Math.round(x * 100)}%`;
 const check = (status, label, detail = "") => ({ status, label, detail });
 
 function sizeCheck(size, target, minBytes, expectFit) {
-  const detail = `${formatSize(size)}, limit ${formatSize(target)}`;
+  const detail = isFinite(target) ? `${formatSize(size)}, limit ${formatSize(target)}` : formatSize(size);
   if (size <= target && size >= minBytes) return check("pass", "Meets your size limit", detail);
   if (!expectFit) return check("note", "Over your size limit", `${detail}. This is the smallest readable size.`);
   return check("fail", size > target ? "Over your size limit" : "Under your minimum size", detail);
@@ -51,8 +51,9 @@ function finish(checks, metrics) {
   return { verdict: overall(checks, metrics ? judge(metrics) : "good"), checks, metrics };
 }
 
-export async function checkImage({ original, outBlob, target, minBytes, expectFit = true }) {
-  const checks = [sizeCheck(outBlob.size, target, minBytes, expectFit)];
+export async function checkImage({ original, outBlob, target, minBytes, expectFit = true, plan = null }) {
+  const checks = [];
+  if (isFinite(target) || minBytes) checks.push(sizeCheck(outBlob.size, target, minBytes, expectFit));
   let outBmp;
   try {
     outBmp = await createImageBitmap(outBlob);
@@ -61,20 +62,37 @@ export async function checkImage({ original, outBlob, target, minBytes, expectFi
     checks.push(check("fail", "File does not open"));
     return finish(checks, null);
   }
-  const k = Math.min(1, ANALYSIS / Math.max(original.width, original.height));
-  const w = Math.max(16, Math.round(original.width * k));
-  const h = Math.max(16, Math.round(original.height * k));
-  const ref = lumaOf((ctx) => ctx.drawImage(original, 0, 0, w, h), w, h);
+  // Compare against the part of the original that was kept (it may have been cropped).
+  const src = plan ? { sx: plan.sx, sy: plan.sy, sw: plan.sw, sh: plan.sh } : { sx: 0, sy: 0, sw: original.width, sh: original.height };
+  // When the user asked for specific pixel dimensions, judge at those dimensions:
+  // shrinking on purpose is not a flaw, so don't blow the output back up to the original's size.
+  const asked = plan && plan.active;
+  const baseW = asked ? outBmp.width : src.sw;
+  const baseH = asked ? outBmp.height : src.sh;
+  const k = Math.min(1, ANALYSIS / Math.max(baseW, baseH));
+  const w = Math.max(16, Math.round(baseW * k));
+  const h = Math.max(16, Math.round(baseH * k));
+  const ref = lumaOf((ctx) => ctx.drawImage(original, src.sx, src.sy, src.sw, src.sh, 0, 0, w, h), w, h);
   const out = lumaOf((ctx) => ctx.drawImage(outBmp, 0, 0, w, h), w, h);
   const m = compare(ref, out, w, h);
   checks.push(...scoreChecks(m));
 
-  const ratio = outBmp.width / original.width;
-  checks.push(
-    ratio < 0.6
-      ? check("warn", "Resolution reduced", `${outBmp.width}×${outBmp.height}px, ${pct(ratio)} of original`)
-      : check("pass", ratio < 0.99 ? "Resolution mostly kept" : "Full resolution kept", `${outBmp.width}×${outBmp.height}px`)
-  );
+  if (plan && plan.active) {
+    checks.push(check("pass", plan.exact ? "Exact pixel size" : "Within your pixel limit", `${outBmp.width}×${outBmp.height}px`));
+    if (plan.exact && src.sw < outBmp.width * 0.99) {
+      checks.push(check("warn", "Enlarged to reach this size", `Original detail is ${Math.round(src.sw)}px wide, so it may look soft`));
+    }
+    if (plan.exact && (src.sw < original.width * 0.99 || src.sh < original.height * 0.99)) {
+      checks.push(check("note", "Edges were cropped", "To match the shape of the size you asked for"));
+    }
+  } else {
+    const ratio = outBmp.width / original.width;
+    checks.push(
+      ratio < 0.6
+        ? check("warn", "Resolution reduced", `${outBmp.width}×${outBmp.height}px, ${pct(ratio)} of original`)
+        : check("pass", ratio < 0.99 ? "Resolution mostly kept" : "Full resolution kept", `${outBmp.width}×${outBmp.height}px`)
+    );
+  }
   outBmp.close();
   return finish(checks, m);
 }

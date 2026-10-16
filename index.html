@@ -35,6 +35,19 @@
       <div class="chips" id="presets" aria-label="Common examples">
       </div>
       <p class="muted">Examples only. Always use the limit shown on your portal.</p>
+      <details id="dims-box" hidden>
+        <summary>Portal also limits width and height?</summary>
+        <p class="muted" id="cur-dims"></p>
+        <div class="row">
+          <input type="number" id="dim-w" min="1" step="1" inputmode="numeric" placeholder="Width" aria-label="Width in pixels">
+          <span class="muted" aria-hidden="true">×</span>
+          <input type="number" id="dim-h" min="1" step="1" inputmode="numeric" placeholder="Height" aria-label="Height in pixels">
+          <span class="muted">px</span>
+        </div>
+        <label class="opt"><input type="radio" name="dim-mode" value="fit" checked> <span>Up to this size, keep the shape</span></label>
+        <label class="opt"><input type="radio" name="dim-mode" value="exact"> <span>Exactly this size (crops the edges)</span></label>
+        <p class="muted">You can leave the file size empty to change only the dimensions.</p>
+      </details>
       <details>
         <summary>Portal also needs a minimum size?</summary>
         <div class="row">

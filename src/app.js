@@ -7,6 +7,7 @@ const MAX_INPUT_BYTES = 50 * 1000 * 1000;
 
 let file = null;
 let kind = null; // "image" | "pdf"
+let plan = null; // image output geometry for the current run
 let bitmap = null; // image only
 let pdfBytes = null; // pdf only
 let pdfPages = 0;
@@ -63,6 +64,8 @@ async function loadFile(f) {
   clearUrls();
   $("result").hidden = true;
   renderPresets();
+  $("dims-box").hidden = kind !== "image";
+  $("cur-dims").textContent = kind === "image" ? `Your image is ${bitmap.width} × ${bitmap.height} px.` : "";
   $("target-card").hidden = false;
 }
 
@@ -87,21 +90,47 @@ function renderPresets() {
   box.hidden = list.length === 0;
 }
 
+function readDims() {
+  // Optional pixel limits (images only). Returns the output geometry, or null on a user error.
+  const full = { sx: 0, sy: 0, sw: bitmap.width, sh: bitmap.height, outW: bitmap.width, outH: bitmap.height, exact: false, active: false };
+  if (kind !== "image") return full;
+  const W = parseInt($("dim-w").value, 10) || 0;
+  const H = parseInt($("dim-h").value, 10) || 0;
+  if (!W && !H) return full;
+  const bw = bitmap.width, bh = bitmap.height;
+  const exact = document.querySelector('input[name="dim-mode"]:checked').value === "exact";
+  if (exact) {
+    if (!W || !H) {
+      showMessage("Enter both width and height for an exact size.", "warn");
+      return null;
+    }
+    const s = Math.max(W / bw, H / bh); // cover, then crop the overflow evenly
+    const sw = W / s, sh = H / s;
+    return { sx: (bw - sw) / 2, sy: (bh - sh) / 2, sw, sh, outW: W, outH: H, exact: true, active: true };
+  }
+  const s = Math.min(1, W ? W / bw : Infinity, H ? H / bh : Infinity); // never enlarge
+  return { ...full, outW: Math.max(1, Math.round(bw * s)), outH: Math.max(1, Math.round(bh * s)), active: true };
+}
+
 function readTargets() {
+  const p = readDims();
+  if (!p) return null;
   const value = parseFloat($("target").value);
-  if (!(value > 0)) {
-    showMessage("Enter the maximum size first.", "warn");
+  let target;
+  const unit = $("unit").value;
+  if (value > 0) target = toBytes(value, unit, "max");
+  else if (p.active) target = Infinity; // dimensions only, no size limit
+  else {
+    showMessage(kind === "image" ? "Enter the maximum size, or a width and height." : "Enter the maximum size first.", "warn");
     return null;
   }
-  const unit = $("unit").value;
-  const target = toBytes(value, unit, "max");
   const minVal = parseFloat($("min").value);
   const minBytes = minVal > 0 ? toBytes(minVal, unit, "min") : 0;
   if (minBytes && minBytes > target) {
     showMessage("The minimum is larger than the maximum.", "warn");
     return null;
   }
-  return { target, minBytes };
+  return { target, minBytes, plan: p };
 }
 
 function busy(on, label) {
@@ -121,10 +150,15 @@ async function run() {
   $("flatten").hidden = true;
   $("lossy").hidden = true;
   pending = null;
+  plan = t.plan;
   limits = { ...t, flattened: false };
   try {
-    if (file.size <= t.target && file.size >= t.minBytes) {
-      return await present(file, `Already ${formatSize(file.size)}, within your ${formatSize(t.target)} limit. No change needed.`, "ok");
+    const resizes = kind === "image" && (plan.outW !== bitmap.width || plan.outH !== bitmap.height || plan.exact);
+    if (!resizes && file.size <= t.target && file.size >= t.minBytes) {
+      const msg = isFinite(t.target)
+        ? `Already ${formatSize(file.size)}, within your ${formatSize(t.target)} limit. No change needed.`
+        : `Already within your pixel limit (${bitmap.width}×${bitmap.height} px). No change needed.`;
+      return await present(file, msg, "ok");
     }
     if (kind === "pdf") await runPdf(t);
     else await runImage(t);
@@ -140,20 +174,23 @@ async function run() {
 
 const canvas = document.createElement("canvas");
 function imageEncoder() {
+  const p = plan;
   return (scale, quality) =>
     new Promise((resolve, reject) => {
-      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      canvas.width = Math.max(1, Math.round(p.outW * scale));
+      canvas.height = Math.max(1, Math.round(p.outH * scale));
       const ctx = canvas.getContext("2d");
+      ctx.imageSmoothingQuality = "high";
       ctx.fillStyle = "#fff"; // JPEG has no transparency
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(bitmap, p.sx, p.sy, p.sw, p.sh, 0, 0, canvas.width, canvas.height);
       canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Encoding failed"))), "image/jpeg", quality);
     });
 }
 
 async function runImage({ target, minBytes }) {
-  const outcome = await fitToTarget(imageEncoder(), target);
+  // An exact pixel size can't be reduced further, so only quality may change.
+  const outcome = await fitToTarget(imageEncoder(), target, plan.exact ? { scales: [1] } : {});
   if (!outcome.ok) {
     const s = outcome.smallest;
     pending = { target, minBytes };
@@ -170,13 +207,15 @@ async function runImage({ target, minBytes }) {
     const bytes = new Uint8Array(await blob.arrayBuffer());
     blob = new Blob([padJpeg(bytes, minBytes)], { type: "image/jpeg" });
   }
-  await present(blob, `Done: ${formatSize(blob.size)}, within your ${formatSize(target)} limit.`, "ok", {
-    caption: dimsCaption(outcome.scale),
-  });
+  const dims = plan.active ? ` Resized to ${Math.round(plan.outW * outcome.scale)}×${Math.round(plan.outH * outcome.scale)} px.` : "";
+  const msg = isFinite(target)
+    ? `Done: ${formatSize(blob.size)}, within your ${formatSize(target)} limit.${dims}`
+    : `Done: ${formatSize(blob.size)}.${dims}`;
+  await present(blob, msg, "ok", { caption: dimsCaption(outcome.scale) });
 }
 
 function dimsCaption(scale) {
-  return ` · ${Math.round(bitmap.width * scale)}×${Math.round(bitmap.height * scale)}px`;
+  return ` · ${Math.round(plan.outW * scale)}×${Math.round(plan.outH * scale)}px`;
 }
 
 // ---------- PDFs ----------
@@ -286,7 +325,7 @@ async function runLossy() {
   $("result").hidden = true;
   $("lossy").hidden = true;
   $("flatten").hidden = true;
-  limits = { target, minBytes, flattened: false };
+  limits = { target, minBytes, flattened: false, plan };
   try {
     if (kind === "image") return await lossyImage(target, minBytes);
     await lossyPdf(target, minBytes);
@@ -299,7 +338,7 @@ async function runLossy() {
 }
 
 async function lossyImage(target, minBytes) {
-  const o = await lossyFit(imageEncoder(), target, LOSSY_SCALES);
+  const o = await lossyFit(imageEncoder(), target, plan.exact ? [1] : LOSSY_SCALES);
   if (!o.ok) {
     const s = o.smallest;
     return present(s.result, `This is as small as it can go: ${formatSize(s.result.size)}. It is still over ${formatSize(target)}.`, "warn", {
