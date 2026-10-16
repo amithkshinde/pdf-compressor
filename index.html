@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fit to size</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Fit to size</h1>
+      <p>Shrink an image to the size a portal asks for. It runs in your browser: your file is never uploaded or stored.</p>
+    </header>
+
+    <section class="card">
+      <label class="drop" id="drop">
+        <input type="file" id="file" accept="image/jpeg,image/png,image/webp">
+        <span id="drop-text">Choose or drop an image (JPG, PNG, WEBP)</span>
+      </label>
+      <p class="muted" id="file-info" hidden></p>
+    </section>
+
+    <section class="card" id="target-card" hidden>
+      <h2>Target size</h2>
+      <div class="row">
+        <input type="number" id="target" min="1" step="any" inputmode="decimal" placeholder="200" aria-label="Maximum size">
+        <select id="unit" aria-label="Unit"><option>KB</option><option>MB</option></select>
+      </div>
+      <div class="chips" id="presets" aria-label="Common examples">
+        <button type="button" data-v="50" data-u="KB">Signature 50 KB</button>
+        <button type="button" data-v="100" data-u="KB">Photo 100 KB</button>
+        <button type="button" data-v="200" data-u="KB">ID proof 200 KB</button>
+        <button type="button" data-v="500" data-u="KB">Marksheet 500 KB</button>
+      </div>
+      <p class="muted">Examples only. Always use the limit shown on your portal.</p>
+      <details>
+        <summary>Portal also needs a minimum size?</summary>
+        <div class="row">
+          <input type="number" id="min" min="0" step="any" inputmode="decimal" placeholder="20" aria-label="Minimum size">
+          <span class="muted">same unit</span>
+        </div>
+      </details>
+      <button id="go" class="primary" type="button">Compress</button>
+    </section>
+
+    <section class="card" id="result" hidden aria-live="polite">
+      <p id="msg"></p>
+      <div class="compare">
+        <figure><img id="img-before" alt="Original"><figcaption id="cap-before"></figcaption></figure>
+        <figure><img id="img-after" alt="Compressed"><figcaption id="cap-after"></figcaption></figure>
+      </div>
+      <div class="row">
+        <a id="download" class="primary" role="button">Download</a>
+      </div>
+    </section>
+
+    <footer class="muted">No uploads. No account. No file storage.</footer>
+  </main>
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>

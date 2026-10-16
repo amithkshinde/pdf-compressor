@@ -1,0 +1,11 @@
+{
+  "name": "pdf-compressor",
+  "version": "0.1.0",
+  "description": "Compress a file to an exact target size, entirely in the browser. No uploads, no cloud storage.",
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 8080",
+    "test": "node --test test/*.test.js"
+  },
+  "license": "MIT"
+}
