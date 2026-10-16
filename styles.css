@@ -33,3 +33,14 @@ footer { text-align:center; margin-top:24px; }
 [hidden] { display:none !important; }
 .secondary { font:inherit; width:100%; min-height:48px; padding:12px; border:1px solid var(--accent); border-radius:10px; background:transparent; color:var(--accent); cursor:pointer; }
 .secondary:disabled { opacity:.6; cursor:wait; }
+.verdict { border:1px solid var(--line); border-left-width:4px; border-radius:8px; padding:10px 12px; margin:0 0 12px; }
+.verdict.good { border-left-color:var(--ok); } .verdict.fair { border-left-color:var(--warn); } .verdict.poor { border-left-color:#c62828; }
+.verdict p { margin:0 0 6px; font-weight:600; font-size:.95rem; }
+.verdict ul { list-style:none; margin:0; padding:0; font-size:.875rem; }
+.verdict li { padding-left:1.4em; position:relative; margin:3px 0; }
+.verdict li span { color:var(--muted); }
+.verdict li::before { position:absolute; left:0; font-weight:700; }
+.verdict li.pass::before { content:"\2713"; color:var(--ok); }
+.verdict li.warn::before { content:"!"; color:var(--warn); }
+.verdict li.fail::before { content:"\2715"; color:#c62828; }
+.verdict li.note::before { content:"i"; color:var(--muted); }

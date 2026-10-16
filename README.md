@@ -26,6 +26,22 @@ PDFs go through three stages, from least to most destructive. The app stops at t
 
 A minimum size is met by adding an unreferenced, uncompressed object inside the PDF. Page content is untouched. Password-protected PDFs are rejected with a clear message.
 
+### Automatic quality check
+
+Every output is checked **before** you see it, on your device, and the result is shown with the preview as one of three verdicts: *passed*, *acceptable (review the preview)* or *failed (may be hard to read)*. The download button is always available; the check informs your decision, it doesn't block it.
+
+| Check | Images | PDFs |
+| --- | --- | --- |
+| Meets the size limit (and minimum) | yes | yes |
+| File opens correctly | yes | yes |
+| Looks like the original (SSIM on the areas that have content, so blank white pages can't inflate the score) | yes | yes, on up to 6 sampled pages; the weakest page is reported |
+| Text and edges stay sharp (edge detail kept) | yes | yes |
+| Resolution kept | yes | n/a |
+| All pages and page sizes kept | n/a | yes |
+| Text still selectable | n/a | yes (informational if you chose to convert pages to images) |
+
+The score thresholds in `src/quality.js` (`judge`) are heuristics and should be tuned against real portal files.
+
 ### Details worth knowing
 
 - Portals disagree on whether 1 KB is 1000 or 1024 bytes. Maximums are counted as 1000 and minimums as 1024, so the result passes under either reading.
@@ -48,6 +64,8 @@ There is no build step and no dependencies. It is plain HTML, CSS and ES modules
 | --- | --- |
 | `index.html`, `styles.css` | Mobile-first single-screen UI |
 | `src/core.js` | Size search, JPEG padding, size units (pure logic, no DOM) |
+| `src/quality.js` | Pure scoring: content-weighted SSIM, edge detail, verdict logic |
+| `src/verify.js` | Runs the quality check on an image or PDF output (browser) |
 | `src/pdf.js` | PDF stages: lossless, recompress scans, convert pages to images, padding |
 | `vendor/` | [pdf-lib](https://pdf-lib.js.org) (MIT) and [pdf.js](https://mozilla.github.io/pdf.js/) (Apache-2.0), vendored so there is no build step |
 | `src/app.js` | File handling, canvas encoding, preview and download |
@@ -58,6 +76,7 @@ There is no build step and no dependencies. It is plain HTML, CSS and ES modules
 - [x] Image compression to a target size (JPG, PNG, WEBP in; JPG out)
 - [x] PDF compression to a target size
 - [x] Optional minimum size
+- [x] Automatic quality check on every output, before the user sees it
 - [x] Before/after preview, honest "can't reach this target" message
 - [x] PDF compression on-device (lossless, recompress scans, opt-in convert to images)
 - [ ] Presets for common portal uploads, editable by the user

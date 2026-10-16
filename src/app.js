@@ -1,5 +1,6 @@
 import { fitToTarget, padJpeg, toBytes, formatSize } from "./core.js";
 import * as pdf from "./pdf.js";
+import { checkImage, checkPdf } from "./verify.js";
 
 const $ = (id) => document.getElementById(id);
 const MAX_INPUT_BYTES = 50 * 1000 * 1000;
@@ -10,6 +11,7 @@ let bitmap = null; // image only
 let pdfBytes = null; // pdf only
 let pdfPages = 0;
 let pending = null; // pdf: target info kept for the opt-in "convert to images" step
+let limits = { target: 0, minBytes: 0, flattened: false }; // what the quality check compares against
 let urls = [];
 
 function trackUrl(blob) {
@@ -92,8 +94,10 @@ async function run() {
   if (!t) return;
   busy(true);
   clearUrls();
+  $("result").hidden = true;
   $("flatten").hidden = true;
   pending = null;
+  limits = { ...t, flattened: false };
   try {
     if (file.size <= t.target && file.size >= t.minBytes) {
       return await present(file, `Already ${formatSize(file.size)}, within your ${formatSize(t.target)} limit. No change needed.`, "ok");
@@ -131,6 +135,7 @@ async function runImage({ target, minBytes }) {
     await present(s.result, `Can't reach ${formatSize(target)} without making this unreadable. The smallest readable size is ${formatSize(s.result.size)}.`, "warn", {
       caption: dimsCaption(s.scale),
       download: "Download smallest anyway",
+      expectFit: false,
     });
     return;
   }
@@ -139,15 +144,9 @@ async function runImage({ target, minBytes }) {
     const bytes = new Uint8Array(await blob.arrayBuffer());
     blob = new Blob([padJpeg(bytes, minBytes)], { type: "image/jpeg" });
   }
-  const soft = outcome.quality < 0.5 || outcome.scale < 0.6;
-  await present(
-    blob,
-    soft
-      ? `Fits ${formatSize(target)}, but detail is reduced. Check the preview before uploading.`
-      : `Done: ${formatSize(blob.size)}, within your ${formatSize(target)} limit.`,
-    soft ? "warn" : "ok",
-    { caption: dimsCaption(outcome.scale) }
-  );
+  await present(blob, `Done: ${formatSize(blob.size)}, within your ${formatSize(target)} limit.`, "ok", {
+    caption: dimsCaption(outcome.scale),
+  });
 }
 
 function dimsCaption(scale) {
@@ -178,13 +177,10 @@ async function runPdf({ target, minBytes }) {
       const outcome = await fitToTarget(pdf.makeRecompressEncoder(pdfBytes, images), target);
       if (outcome.ok) {
         const blob = await finishPdf(outcome.result, minBytes);
-        const soft = outcome.quality < 0.5 || outcome.scale < 0.6;
         return present(
           blob,
-          soft
-            ? `Fits ${formatSize(target)}, but scanned images are softer. Check the preview before uploading. Text is unchanged.`
-            : `Done: ${formatSize(blob.size)}, within your ${formatSize(target)} limit. Scanned images were recompressed; text is unchanged.`,
-          soft ? "warn" : "ok"
+          `Done: ${formatSize(blob.size)}, within your ${formatSize(target)} limit. Scanned images were recompressed; text is unchanged.`,
+          "ok"
         );
       }
       smallest = outcome.smallest.result;
@@ -204,7 +200,7 @@ async function runPdf({ target, minBytes }) {
         ? ` Converting pages to images works for up to ${pdf.FLATTEN_MAX_PAGES} pages; this PDF has ${pdfPages}.`
         : " You can convert the pages to images to go smaller, but text will no longer be selectable or searchable."),
     "warn",
-    { download: `Download smallest (${formatSize(blob.size)})` }
+    { download: `Download smallest (${formatSize(blob.size)})`, expectFit: false }
   );
   $("flatten").hidden = tooLong;
 }
@@ -213,6 +209,8 @@ async function runFlatten() {
   if (!pending) return;
   const { target, minBytes } = pending;
   busy(true, "Converting…");
+  $("result").hidden = true;
+  limits = { target, minBytes, flattened: true };
   const encode = await pdf.makeFlattenEncoder(pdfBytes);
   try {
     const outcome = await fitToTarget(encode, target, { scales: pdf.FLATTEN_SCALES, floorQuality: 0.4 });
@@ -220,14 +218,12 @@ async function runFlatten() {
     if (!outcome.ok) {
       const s = outcome.smallest.result;
       const blob = new Blob([s.bytes], { type: "application/pdf" });
-      return await present(blob, `Even as images, ${formatSize(target)} would make the pages unreadable. The smallest readable size is ${formatSize(blob.size)}.`, "warn", { download: "Download smallest anyway" });
+      return await present(blob, `Even as images, ${formatSize(target)} would make the pages unreadable. The smallest readable size is ${formatSize(blob.size)}.`, "warn", { download: "Download smallest anyway", expectFit: false });
     }
     const blob = await finishPdf(outcome.result, minBytes);
-    const soft = outcome.scale < 1.15 || outcome.quality < 0.5;
     await present(
       blob,
-      `Done: ${formatSize(blob.size)}, within your ${formatSize(target)} limit. Pages are now images, so text can't be selected or searched.` +
-        (soft ? " Detail is reduced, so check the preview." : ""),
+      `Done: ${formatSize(blob.size)}, within your ${formatSize(target)} limit. Pages are now images, so text can't be selected or searched.`,
       "warn"
     );
   } catch (e) {
@@ -257,8 +253,57 @@ async function previewUrl(blobOrFile, isOriginal) {
   }
 }
 
+async function runCheck(blob, expectFit) {
+  $("go").textContent = "Checking quality…";
+  try {
+    if (kind === "image") {
+      return await checkImage({ original: bitmap, outBlob: blob, ...limits, expectFit });
+    }
+    const outBytes = new Uint8Array(await blob.arrayBuffer());
+    return await checkPdf({ originalBytes: pdfBytes, outBytes, ...limits, expectFit });
+  } catch (e) {
+    console.error(e);
+    return null; // a failed check must never block the download
+  }
+}
+
+const VERDICT_TEXT = {
+  good: "Quality check passed",
+  fair: "Quality check: acceptable. Review the preview before uploading.",
+  poor: "Quality check failed. This output may be hard to read.",
+};
+const SYMBOL = { pass: "pass", warn: "warn", fail: "fail", note: "note" };
+
+function showVerdict(report) {
+  const box = $("verdict");
+  if (!report) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  box.className = `verdict ${report.verdict}`;
+  $("verdict-title").textContent = VERDICT_TEXT[report.verdict];
+  const list = $("checks");
+  list.replaceChildren();
+  for (const c of report.checks) {
+    const li = document.createElement("li");
+    li.className = SYMBOL[c.status];
+    li.textContent = c.label;
+    if (c.detail) {
+      const d = document.createElement("span");
+      d.textContent = ` · ${c.detail}`;
+      li.append(d);
+    }
+    list.append(li);
+  }
+}
+
 async function present(blob, text, cls, opts = {}) {
+  // Check the output before the user sees it. The untouched original needs no check.
+  const report = blob === file ? null : await runCheck(blob, opts.expectFit !== false);
+  if (report && report.verdict === "poor" && cls === "ok") cls = "warn";
   showMessage(text, cls);
+  showVerdict(report);
   const before = $("img-before");
   const after = $("img-after");
   before.removeAttribute("src");
@@ -272,7 +317,7 @@ async function present(blob, text, cls, opts = {}) {
   const dl = $("download");
   dl.href = trackUrl(blob);
   dl.download = blob === file ? file.name : `${base}-fit.${ext}`;
-  dl.textContent = opts.download || "Download";
+  dl.textContent = opts.download || (report && report.verdict === "poor" ? "Download anyway" : "Download");
   $("result").scrollIntoView({ behavior: "smooth", block: "nearest" });
 
   const [b, a] = await Promise.all([previewUrl(file, true), previewUrl(blob, false)]);
