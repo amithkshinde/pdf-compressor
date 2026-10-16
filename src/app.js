@@ -108,6 +108,7 @@ function busy(on, label) {
   const btn = $("go");
   btn.disabled = on;
   $("flatten").disabled = on;
+  $("lossy").disabled = on;
   btn.textContent = on ? label || "Optimising…" : "Make it fit";
 }
 
@@ -118,6 +119,7 @@ async function run() {
   clearUrls();
   $("result").hidden = true;
   $("flatten").hidden = true;
+  $("lossy").hidden = true;
   pending = null;
   limits = { ...t, flattened: false };
   try {
@@ -154,6 +156,8 @@ async function runImage({ target, minBytes }) {
   const outcome = await fitToTarget(imageEncoder(), target);
   if (!outcome.ok) {
     const s = outcome.smallest;
+    pending = { target, minBytes };
+    $("lossy").hidden = false;
     await present(s.result, `Can't reach ${formatSize(target)} without making this unreadable. The smallest readable size is ${formatSize(s.result.size)}.`, "warn", {
       caption: dimsCaption(s.scale),
       download: "Download smallest anyway",
@@ -215,6 +219,7 @@ async function runPdf({ target, minBytes }) {
   pending = { target, minBytes };
   const blob = new Blob([smallest.bytes], { type: "application/pdf" });
   const tooLong = pdfPages > pdf.FLATTEN_MAX_PAGES;
+  $("lossy").hidden = tooLong && !images.length;
   await present(
     blob,
     `Can't reach ${formatSize(target)} while keeping this PDF as it is. The smallest that keeps text is ${formatSize(blob.size)}.` +
@@ -232,12 +237,14 @@ async function runFlatten() {
   const { target, minBytes } = pending;
   busy(true, "Converting…");
   $("result").hidden = true;
+  $("lossy").hidden = true;
   limits = { target, minBytes, flattened: true };
   const encode = await pdf.makeFlattenEncoder(pdfBytes);
   try {
     const outcome = await fitToTarget(encode, target, { scales: pdf.FLATTEN_SCALES, floorQuality: 0.4 });
     $("flatten").hidden = true;
     if (!outcome.ok) {
+      $("lossy").hidden = false;
       const s = outcome.smallest.result;
       const blob = new Blob([s.bytes], { type: "application/pdf" });
       return await present(blob, `Even as images, ${formatSize(target)} would make the pages unreadable. The smallest readable size is ${formatSize(blob.size)}.`, "warn", { download: "Download smallest anyway", expectFit: false });
@@ -255,6 +262,90 @@ async function runFlatten() {
     encode.close();
     busy(false);
   }
+}
+
+// ---------- shrink further (lossy) ----------
+// Opt-in last resort: goes below the "readable" floor. Lowering resolution first
+// (soft but legible) and only then dropping JPEG quality (blocky).
+
+const LOSSY_SCALES = [1, 0.8, 0.6, 0.5, 0.4, 0.3, 0.25, 0.2, 0.15, 0.1];
+const LOSSY_FLATTEN_SCALES = [1.15, 0.85, 0.7, 0.55, 0.4, 0.3, 0.2];
+
+async function lossyFit(encode, target, scales) {
+  const first = await fitToTarget(encode, target, { scales, floorQuality: 0.35 });
+  if (first.ok) return first;
+  return fitToTarget(encode, target, { scales, floorQuality: 0.15 });
+}
+
+const LOSSY_NOTE = "Quality was lowered to reach this size. Check the preview before you upload.";
+
+async function runLossy() {
+  if (!pending) return;
+  const { target, minBytes } = pending;
+  busy(true, "Shrinking…");
+  $("result").hidden = true;
+  $("lossy").hidden = true;
+  $("flatten").hidden = true;
+  limits = { target, minBytes, flattened: false };
+  try {
+    if (kind === "image") return await lossyImage(target, minBytes);
+    await lossyPdf(target, minBytes);
+  } catch (e) {
+    console.error(e);
+    showMessage("Something went wrong while shrinking. Please try again.", "warn");
+  } finally {
+    busy(false);
+  }
+}
+
+async function lossyImage(target, minBytes) {
+  const o = await lossyFit(imageEncoder(), target, LOSSY_SCALES);
+  if (!o.ok) {
+    const s = o.smallest;
+    return present(s.result, `This is as small as it can go: ${formatSize(s.result.size)}. It is still over ${formatSize(target)}.`, "warn", {
+      caption: dimsCaption(s.scale), download: "Download smallest anyway", expectFit: false,
+    });
+  }
+  let blob = o.result;
+  if (minBytes && blob.size < minBytes) {
+    blob = new Blob([padJpeg(new Uint8Array(await blob.arrayBuffer()), minBytes)], { type: "image/jpeg" });
+  }
+  await present(blob, `Done: ${formatSize(blob.size)}, within your ${formatSize(target)} limit. ${LOSSY_NOTE}`, "warn", { caption: dimsCaption(o.scale) });
+}
+
+async function lossyPdf(target, minBytes) {
+  let smallest = null;
+  // First keep the text: squeeze the embedded scans harder.
+  const images = await pdf.prepareImages(pdfBytes);
+  if (images.length) {
+    try {
+      const o = await lossyFit(pdf.makeRecompressEncoder(pdfBytes, images), target, LOSSY_SCALES);
+      if (o.ok) {
+        const blob = await finishPdf(o.result, minBytes);
+        return present(blob, `Done: ${formatSize(blob.size)}, within your ${formatSize(target)} limit. Scans were compressed harder; text is unchanged. ${LOSSY_NOTE}`, "warn");
+      }
+      smallest = o.smallest.result;
+    } finally {
+      images.forEach((i) => i.bitmap.close());
+    }
+  }
+  // Then turn pages into low-resolution images.
+  if (pdfPages <= pdf.FLATTEN_MAX_PAGES) {
+    const encode = await pdf.makeFlattenEncoder(pdfBytes);
+    try {
+      limits.flattened = true;
+      const o = await lossyFit(encode, target, LOSSY_FLATTEN_SCALES);
+      if (o.ok) {
+        const blob = await finishPdf(o.result, minBytes);
+        return present(blob, `Done: ${formatSize(blob.size)}, within your ${formatSize(target)} limit. Pages are now low-quality images, so text can't be selected. ${LOSSY_NOTE}`, "warn");
+      }
+      smallest = o.smallest.result;
+    } finally {
+      encode.close();
+    }
+  }
+  const blob = new Blob([smallest.bytes], { type: "application/pdf" });
+  await present(blob, `This is as small as it can go: ${formatSize(blob.size)}. It is still over ${formatSize(target)}.`, "warn", { download: "Download smallest anyway", expectFit: false });
 }
 
 // ---------- result card ----------
@@ -350,6 +441,7 @@ async function present(blob, text, cls, opts = {}) {
 $("file").addEventListener("change", (e) => loadFile(e.target.files[0]));
 $("go").addEventListener("click", run);
 $("flatten").addEventListener("click", runFlatten);
+$("lossy").addEventListener("click", runLossy);
 $("presets").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;
