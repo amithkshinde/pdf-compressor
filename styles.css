@@ -31,3 +31,5 @@ summary { cursor:pointer; color:var(--muted); }
 figcaption { font-size:.8rem; color:var(--muted); margin-top:4px; }
 footer { text-align:center; margin-top:24px; }
 [hidden] { display:none !important; }
+.secondary { font:inherit; width:100%; min-height:48px; padding:12px; border:1px solid var(--accent); border-radius:10px; background:transparent; color:var(--accent); cursor:pointer; }
+.secondary:disabled { opacity:.6; cursor:wait; }

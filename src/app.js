@@ -1,10 +1,15 @@
 import { fitToTarget, padJpeg, toBytes, formatSize } from "./core.js";
+import * as pdf from "./pdf.js";
 
 const $ = (id) => document.getElementById(id);
 const MAX_INPUT_BYTES = 50 * 1000 * 1000;
 
 let file = null;
-let bitmap = null;
+let kind = null; // "image" | "pdf"
+let bitmap = null; // image only
+let pdfBytes = null; // pdf only
+let pdfPages = 0;
+let pending = null; // pdf: target info kept for the opt-in "convert to images" step
 let urls = [];
 
 function trackUrl(blob) {
@@ -16,35 +21,97 @@ function clearUrls() {
   urls.forEach(URL.revokeObjectURL);
   urls = [];
 }
-
-async function loadFile(f) {
-  if (!f) return;
-  if (!/^image\/(jpeg|png|webp)$/.test(f.type)) {
-    return showInfo("Unsupported file. Please choose a JPG, PNG or WEBP image.");
-  }
-  if (f.size > MAX_INPUT_BYTES) {
-    return showInfo("This file is over 50 MB. Please choose a smaller one.");
-  }
-  try {
-    bitmap = await createImageBitmap(f, { imageOrientation: "from-image" });
-  } catch {
-    return showInfo("This image could not be opened. It may be corrupt.");
-  }
-  file = f;
-  clearUrls();
-  $("result").hidden = true;
-  $("target-card").hidden = false;
-  showInfo(`${f.name} · ${formatSize(f.size)} · ${bitmap.width}×${bitmap.height}px`);
-}
-
 function showInfo(text) {
   const el = $("file-info");
   el.textContent = text;
   el.hidden = false;
 }
 
+async function loadFile(f) {
+  if (!f) return;
+  const isPdf = f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+  if (!isPdf && !/^image\/(jpeg|png|webp)$/.test(f.type)) {
+    return showInfo("Unsupported file. Please choose a PDF, JPG, PNG or WEBP.");
+  }
+  if (f.size > MAX_INPUT_BYTES) {
+    return showInfo("This file is over 50 MB. Please choose a smaller one.");
+  }
+  try {
+    if (isPdf) {
+      pdfBytes = new Uint8Array(await f.arrayBuffer());
+      pdfPages = await pdf.pageCount(pdfBytes);
+      bitmap = null;
+      kind = "pdf";
+      showInfo(`${f.name} · ${formatSize(f.size)} · ${pdfPages} page${pdfPages === 1 ? "" : "s"}`);
+    } else {
+      bitmap = await createImageBitmap(f, { imageOrientation: "from-image" });
+      pdfBytes = null;
+      kind = "image";
+      showInfo(`${f.name} · ${formatSize(f.size)} · ${bitmap.width}×${bitmap.height}px`);
+    }
+  } catch (e) {
+    return showInfo(
+      e instanceof pdf.EncryptedPdfError
+        ? "This PDF is password-protected. Remove the password first, then try again."
+        : "This file could not be opened. It may be corrupt."
+    );
+  }
+  file = f;
+  pending = null;
+  clearUrls();
+  $("result").hidden = true;
+  $("target-card").hidden = false;
+}
+
+function readTargets() {
+  const value = parseFloat($("target").value);
+  if (!(value > 0)) {
+    showMessage("Enter the maximum size first.", "warn");
+    return null;
+  }
+  const unit = $("unit").value;
+  const target = toBytes(value, unit, "max");
+  const minVal = parseFloat($("min").value);
+  const minBytes = minVal > 0 ? toBytes(minVal, unit, "min") : 0;
+  if (minBytes && minBytes > target) {
+    showMessage("The minimum is larger than the maximum.", "warn");
+    return null;
+  }
+  return { target, minBytes };
+}
+
+function busy(on, label) {
+  const btn = $("go");
+  btn.disabled = on;
+  $("flatten").disabled = on;
+  btn.textContent = on ? label || "Optimising…" : "Compress";
+}
+
+async function run() {
+  const t = readTargets();
+  if (!t) return;
+  busy(true);
+  clearUrls();
+  $("flatten").hidden = true;
+  pending = null;
+  try {
+    if (file.size <= t.target && file.size >= t.minBytes) {
+      return await present(file, `Already ${formatSize(file.size)}, within your ${formatSize(t.target)} limit. No change needed.`, "ok");
+    }
+    if (kind === "pdf") await runPdf(t);
+    else await runImage(t);
+  } catch (e) {
+    console.error(e);
+    showMessage("Something went wrong while compressing. Please try again.", "warn");
+  } finally {
+    busy(false);
+  }
+}
+
+// ---------- images ----------
+
 const canvas = document.createElement("canvas");
-function makeEncoder() {
+function imageEncoder() {
   return (scale, quality) =>
     new Promise((resolve, reject) => {
       canvas.width = Math.max(1, Math.round(bitmap.width * scale));
@@ -53,92 +120,169 @@ function makeEncoder() {
       ctx.fillStyle = "#fff"; // JPEG has no transparency
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error("Encoding failed"))),
-        "image/jpeg",
-        quality
-      );
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Encoding failed"))), "image/jpeg", quality);
     });
 }
 
-async function run() {
-  const value = parseFloat($("target").value);
-  if (!(value > 0)) return showMessage("Enter the maximum size first.", "warn");
-  const unit = $("unit").value;
-  const target = toBytes(value, unit, "max");
-  const minVal = parseFloat($("min").value);
-  const minBytes = minVal > 0 ? toBytes(minVal, unit, "min") : 0;
-  if (minBytes && minBytes > target) {
-    return showMessage("The minimum is larger than the maximum.", "warn");
+async function runImage({ target, minBytes }) {
+  const outcome = await fitToTarget(imageEncoder(), target);
+  if (!outcome.ok) {
+    const s = outcome.smallest;
+    await present(s.result, `Can't reach ${formatSize(target)} without making this unreadable. The smallest readable size is ${formatSize(s.result.size)}.`, "warn", {
+      caption: dimsCaption(s.scale),
+      download: "Download smallest anyway",
+    });
+    return;
+  }
+  let blob = outcome.result;
+  if (minBytes && blob.size < minBytes) {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    blob = new Blob([padJpeg(bytes, minBytes)], { type: "image/jpeg" });
+  }
+  const soft = outcome.quality < 0.5 || outcome.scale < 0.6;
+  await present(
+    blob,
+    soft
+      ? `Fits ${formatSize(target)}, but detail is reduced. Check the preview before uploading.`
+      : `Done: ${formatSize(blob.size)}, within your ${formatSize(target)} limit.`,
+    soft ? "warn" : "ok",
+    { caption: dimsCaption(outcome.scale) }
+  );
+}
+
+function dimsCaption(scale) {
+  return ` · ${Math.round(bitmap.width * scale)}×${Math.round(bitmap.height * scale)}px`;
+}
+
+// ---------- PDFs ----------
+
+async function finishPdf(result, minBytes) {
+  let bytes = result.bytes;
+  if (minBytes && bytes.length < minBytes) bytes = await pdf.padPdf(result.doc, bytes, minBytes);
+  return new Blob([bytes], { type: "application/pdf" });
+}
+
+async function runPdf({ target, minBytes }) {
+  // Stage 1: lossless. Text stays selectable.
+  const lossless = await pdf.saveLossless(pdfBytes);
+  if (lossless.bytes.length <= target) {
+    const blob = await finishPdf(lossless, minBytes);
+    return present(blob, `Done: ${formatSize(blob.size)}, within your ${formatSize(target)} limit. Text and layout are unchanged.`, "ok");
   }
 
-  const btn = $("go");
-  btn.disabled = true;
-  btn.textContent = "Optimising…";
-  clearUrls();
+  // Stage 2: recompress embedded JPEG scans. Text stays selectable.
+  let smallest = { size: lossless.bytes.length, bytes: lossless.bytes, doc: lossless.doc };
+  const images = await pdf.prepareImages(pdfBytes);
+  if (images.length) {
+    try {
+      const outcome = await fitToTarget(pdf.makeRecompressEncoder(pdfBytes, images), target);
+      if (outcome.ok) {
+        const blob = await finishPdf(outcome.result, minBytes);
+        const soft = outcome.quality < 0.5 || outcome.scale < 0.6;
+        return present(
+          blob,
+          soft
+            ? `Fits ${formatSize(target)}, but scanned images are softer. Check the preview before uploading. Text is unchanged.`
+            : `Done: ${formatSize(blob.size)}, within your ${formatSize(target)} limit. Scanned images were recompressed; text is unchanged.`,
+          soft ? "warn" : "ok"
+        );
+      }
+      smallest = outcome.smallest.result;
+    } finally {
+      images.forEach((i) => i.bitmap.close());
+    }
+  }
 
+  // Stage 3 needs the user's consent: it removes selectable text.
+  pending = { target, minBytes };
+  const blob = new Blob([smallest.bytes], { type: "application/pdf" });
+  const tooLong = pdfPages > pdf.FLATTEN_MAX_PAGES;
+  await present(
+    blob,
+    `Can't reach ${formatSize(target)} while keeping this PDF as it is. The smallest that keeps text is ${formatSize(blob.size)}.` +
+      (tooLong
+        ? ` Converting pages to images works for up to ${pdf.FLATTEN_MAX_PAGES} pages; this PDF has ${pdfPages}.`
+        : " You can convert the pages to images to go smaller, but text will no longer be selectable or searchable."),
+    "warn",
+    { download: `Download smallest (${formatSize(blob.size)})` }
+  );
+  $("flatten").hidden = tooLong;
+}
+
+async function runFlatten() {
+  if (!pending) return;
+  const { target, minBytes } = pending;
+  busy(true, "Converting…");
+  const encode = await pdf.makeFlattenEncoder(pdfBytes);
   try {
-    // Already small enough: hand the original back untouched.
-    if (file.size <= target && file.size >= minBytes) {
-      return present(file, `Already ${formatSize(file.size)}, within your ${formatSize(target)} limit. No change needed.`, "ok");
-    }
-
-    const outcome = await fitToTarget(makeEncoder(), target);
+    const outcome = await fitToTarget(encode, target, { scales: pdf.FLATTEN_SCALES, floorQuality: 0.4 });
+    $("flatten").hidden = true;
     if (!outcome.ok) {
-      const s = outcome.smallest;
-      present(s.result, `Can't reach ${formatSize(target)} without making this unreadable. The smallest readable size is ${formatSize(s.result.size)}.`, "warn", s);
-      $("download").textContent = "Download smallest anyway";
-      return;
+      const s = outcome.smallest.result;
+      const blob = new Blob([s.bytes], { type: "application/pdf" });
+      return await present(blob, `Even as images, ${formatSize(target)} would make the pages unreadable. The smallest readable size is ${formatSize(blob.size)}.`, "warn", { download: "Download smallest anyway" });
     }
-
-    let blob = outcome.result;
-    if (minBytes && blob.size < minBytes) {
-      const bytes = new Uint8Array(await blob.arrayBuffer());
-      blob = new Blob([padJpeg(bytes, minBytes)], { type: "image/jpeg" });
-    }
-    const soft = outcome.quality < 0.5 || outcome.scale < 0.6;
-    present(
+    const blob = await finishPdf(outcome.result, minBytes);
+    const soft = outcome.scale < 1.15 || outcome.quality < 0.5;
+    await present(
       blob,
-      soft
-        ? `Fits ${formatSize(target)}, but detail is reduced. Check the preview before uploading.`
-        : `Done: ${formatSize(blob.size)}, within your ${formatSize(target)} limit.`,
-      soft ? "warn" : "ok",
-      outcome
+      `Done: ${formatSize(blob.size)}, within your ${formatSize(target)} limit. Pages are now images, so text can't be selected or searched.` +
+        (soft ? " Detail is reduced, so check the preview." : ""),
+      "warn"
     );
   } catch (e) {
-    showMessage("Something went wrong while compressing. Please try again.", "warn");
+    console.error(e);
+    showMessage("Something went wrong while converting. Please try again.", "warn");
   } finally {
-    btn.disabled = false;
-    btn.textContent = "Compress";
+    encode.close();
+    busy(false);
   }
 }
 
-function showMessage(text, kind) {
+// ---------- result card ----------
+
+function showMessage(text, cls) {
   $("result").hidden = false;
   $("msg").textContent = text;
-  $("msg").className = kind;
+  $("msg").className = cls;
 }
 
-function present(blob, text, kind, detail) {
-  showMessage(text, kind);
-  $("img-before").src = trackUrl(file);
-  $("img-after").src = trackUrl(blob);
+async function previewUrl(blobOrFile, isOriginal) {
+  if (kind === "image") return trackUrl(blobOrFile);
+  try {
+    const bytes = isOriginal ? pdfBytes : new Uint8Array(await blobOrFile.arrayBuffer());
+    return trackUrl(await pdf.renderPreview(bytes));
+  } catch {
+    return "";
+  }
+}
+
+async function present(blob, text, cls, opts = {}) {
+  showMessage(text, cls);
+  const before = $("img-before");
+  const after = $("img-after");
+  before.removeAttribute("src");
+  after.removeAttribute("src");
   $("cap-before").textContent = `Original · ${formatSize(file.size)}`;
-  const dims = detail && detail.scale
-    ? ` · ${Math.round(bitmap.width * detail.scale)}×${Math.round(bitmap.height * detail.scale)}px`
-    : "";
-  $("cap-after").textContent = `New · ${formatSize(blob.size)}${dims}`;
+  const extra = opts.caption || (kind === "pdf" ? ` · ${pdfPages} page${pdfPages === 1 ? "" : "s"}` : "");
+  $("cap-after").textContent = `New · ${formatSize(blob.size)}${extra}`;
+
   const base = file.name.replace(/\.[^.]+$/, "");
-  const ext = blob === file ? file.name.split(".").pop() : "jpg";
+  const ext = kind === "pdf" ? "pdf" : "jpg";
   const dl = $("download");
   dl.href = trackUrl(blob);
   dl.download = blob === file ? file.name : `${base}-fit.${ext}`;
-  dl.textContent = "Download";
+  dl.textContent = opts.download || "Download";
   $("result").scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+  const [b, a] = await Promise.all([previewUrl(file, true), previewUrl(blob, false)]);
+  if (b) before.src = b;
+  if (a) after.src = a;
 }
 
 $("file").addEventListener("change", (e) => loadFile(e.target.files[0]));
 $("go").addEventListener("click", run);
+$("flatten").addEventListener("click", runFlatten);
 $("presets").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b) return;

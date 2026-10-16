@@ -10,13 +10,13 @@
   <main>
     <header>
       <h1>Fit to size</h1>
-      <p>Shrink an image to the size a portal asks for. It runs in your browser: your file is never uploaded or stored.</p>
+      <p>Shrink a PDF or image to the size a portal asks for. It runs in your browser: your file is never uploaded or stored.</p>
     </header>
 
     <section class="card">
       <label class="drop" id="drop">
-        <input type="file" id="file" accept="image/jpeg,image/png,image/webp">
-        <span id="drop-text">Choose or drop an image (JPG, PNG, WEBP)</span>
+        <input type="file" id="file" accept="image/jpeg,image/png,image/webp,application/pdf,.pdf">
+        <span id="drop-text">Choose or drop a file (PDF, JPG, PNG, WEBP)</span>
       </label>
       <p class="muted" id="file-info" hidden></p>
     </section>
@@ -52,6 +52,9 @@
       </div>
       <div class="row">
         <a id="download" class="primary" role="button">Download</a>
+      </div>
+      <div class="row">
+        <button id="flatten" type="button" class="secondary" hidden>Convert pages to images to go smaller</button>
       </div>
     </section>
 
