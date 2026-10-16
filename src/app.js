@@ -92,8 +92,8 @@ function renderPresets() {
 
 function readDims() {
   // Optional pixel limits (images only). Returns the output geometry, or null on a user error.
+  if (kind !== "image") return { active: false, exact: false };
   const full = { sx: 0, sy: 0, sw: bitmap.width, sh: bitmap.height, outW: bitmap.width, outH: bitmap.height, exact: false, active: false };
-  if (kind !== "image") return full;
   const W = parseInt($("dim-w").value, 10) || 0;
   const H = parseInt($("dim-h").value, 10) || 0;
   if (!W && !H) return full;
