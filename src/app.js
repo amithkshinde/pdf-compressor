@@ -90,6 +90,12 @@ function renderPresets() {
   box.hidden = list.length === 0;
 }
 
+function offerLossy(target) {
+  const b = $("lossy");
+  b.textContent = `Yes, go down to ${formatSize(target)} anyway`;
+  b.hidden = false;
+}
+
 function readDims() {
   // Optional pixel limits (images only). Returns the output geometry, or null on a user error.
   if (kind !== "image") return { active: false, exact: false };
@@ -194,10 +200,10 @@ async function runImage({ target, minBytes }) {
   if (!outcome.ok) {
     const s = outcome.smallest;
     pending = { target, minBytes };
-    $("lossy").hidden = false;
-    await present(s.result, `Can't reach ${formatSize(target)} without making this unreadable. The smallest readable size is ${formatSize(s.result.size)}.`, "warn", {
+    offerLossy(target);
+    await present(s.result, `${formatSize(target)} is lower than this file can go without losing quality. The smallest clear version is ${formatSize(s.result.size)}. Do you really want to go down to ${formatSize(target)}? It will look worse.`, "warn", {
       caption: dimsCaption(s.scale),
-      download: "Download smallest anyway",
+      download: `Keep the clear ${formatSize(s.result.size)} version`,
       expectFit: false,
     });
     return;
@@ -258,15 +264,16 @@ async function runPdf({ target, minBytes }) {
   pending = { target, minBytes };
   const blob = new Blob([smallest.bytes], { type: "application/pdf" });
   const tooLong = pdfPages > pdf.FLATTEN_MAX_PAGES;
-  $("lossy").hidden = tooLong && !images.length;
+  if (tooLong && !images.length) $("lossy").hidden = true;
+  else offerLossy(target);
   await present(
     blob,
-    `Can't reach ${formatSize(target)} while keeping this PDF as it is. The smallest that keeps text is ${formatSize(blob.size)}.` +
+    `${formatSize(target)} is lower than this PDF can go without losing quality. The smallest clear version is ${formatSize(blob.size)}, with text intact. Do you really want to go down to ${formatSize(target)}? It will look worse.` +
       (tooLong
-        ? ` Converting pages to images works for up to ${pdf.FLATTEN_MAX_PAGES} pages; this PDF has ${pdfPages}.`
-        : " You can convert the pages to images to go smaller, but text will no longer be selectable or searchable."),
+        ? ` Converting pages to images only works for up to ${pdf.FLATTEN_MAX_PAGES} pages; this PDF has ${pdfPages}.`
+        : " Converting pages to images also gets smaller, but text can no longer be selected or searched."),
     "warn",
-    { download: `Download smallest (${formatSize(blob.size)})`, expectFit: false }
+    { download: `Keep the clear ${formatSize(blob.size)} version`, expectFit: false }
   );
   $("flatten").hidden = tooLong;
 }
@@ -283,10 +290,10 @@ async function runFlatten() {
     const outcome = await fitToTarget(encode, target, { scales: pdf.FLATTEN_SCALES, floorQuality: 0.4 });
     $("flatten").hidden = true;
     if (!outcome.ok) {
-      $("lossy").hidden = false;
+      offerLossy(target);
       const s = outcome.smallest.result;
       const blob = new Blob([s.bytes], { type: "application/pdf" });
-      return await present(blob, `Even as images, ${formatSize(target)} would make the pages unreadable. The smallest readable size is ${formatSize(blob.size)}.`, "warn", { download: "Download smallest anyway", expectFit: false });
+      return await present(blob, `As page images, ${formatSize(target)} is lower than these pages can go without losing quality. The smallest clear version is ${formatSize(blob.size)}. Do you really want to go down to ${formatSize(target)}? It will look worse.`, "warn", { download: `Keep the clear ${formatSize(blob.size)} version`, expectFit: false });
     }
     const blob = await finishPdf(outcome.result, minBytes);
     await present(
