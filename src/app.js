@@ -62,7 +62,29 @@ async function loadFile(f) {
   pending = null;
   clearUrls();
   $("result").hidden = true;
+  renderPresets();
   $("target-card").hidden = false;
+}
+
+const PRESETS = {
+  image: [["Signature", 50, "KB"], ["Photo", 100, "KB"], ["ID photo", 200, "KB"], ["Scanned ID", 500, "KB"]],
+  pdf: [["Certificate", 200, "KB"], ["ID proof", 500, "KB"], ["Application form", 1, "MB"], ["Resume", 2, "MB"]],
+};
+
+function renderPresets() {
+  const box = $("presets");
+  box.replaceChildren();
+  // Only suggest sizes smaller than the file; larger ones need no compression.
+  const list = PRESETS[kind].filter(([, v, u]) => v * (u === "MB" ? 1e6 : 1e3) < file.size);
+  list.forEach(([name, v, u]) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.dataset.v = v;
+    b.dataset.u = u;
+    b.textContent = `${name} ${v} ${u}`;
+    box.appendChild(b);
+  });
+  box.hidden = list.length === 0;
 }
 
 function readTargets() {
