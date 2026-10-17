@@ -502,3 +502,38 @@ const drop = $("drop");
   drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("over"); })
 );
 drop.addEventListener("drop", (e) => loadFile(e.dataTransfer.files[0]));
+
+// ---------- trust cues ----------
+
+function updateNet() {
+  const el = $("net-status");
+  const online = navigator.onLine;
+  el.classList.toggle("off", !online);
+  el.textContent = online
+    ? "Online now. Try airplane mode: it still works."
+    : "You're offline and it still works. Nothing can be uploaded.";
+}
+window.addEventListener("online", updateNet);
+window.addEventListener("offline", updateNet);
+updateNet();
+
+function resetAll() {
+  clearUrls();
+  if (bitmap) bitmap.close();
+  file = bitmap = pdfBytes = pending = plan = null;
+  kind = null;
+  pdfPages = 0;
+  $("file").value = "";
+  ["target", "min", "dim-w", "dim-h"].forEach((id) => ($(id).value = ""));
+  ["img-before", "img-after"].forEach((id) => $(id).removeAttribute("src"));
+  $("download").removeAttribute("href");
+  $("file-info").hidden = true;
+  $("result").hidden = true;
+  $("target-card").hidden = true;
+  $("verdict").hidden = true;
+  $("flatten").hidden = true;
+  $("lossy").hidden = true;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  $("drop").focus?.();
+}
+$("reset").addEventListener("click", resetAll);
