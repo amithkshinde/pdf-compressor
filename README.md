@@ -86,6 +86,13 @@ There is no build step and no dependencies. It is plain HTML, CSS and ES modules
 
 ## Privacy
 
-Files are read, compressed and downloaded entirely inside your browser tab (including PDFs: the PDF libraries are bundled in `vendor/`, not fetched from a CDN). Nothing is sent to a server, and closing the tab clears everything from memory. The only thing hosted is the static app itself.
+Files are read, compressed and downloaded entirely inside your browser tab (including PDFs: the PDF libraries are bundled in `vendor/`, not fetched from a CDN). The app has no backend: the only thing hosted is the static site.
 
-The deployed site also uses Vercel Web Analytics, which counts page views only (no cookies, nothing about your files). It is a single script tag in `index.html`; delete it to run with no analytics at all. Locally it simply 404s and does nothing.
+You don't have to take that on trust:
+
+- **The browser enforces it.** `vercel.json` sends a Content-Security-Policy that only allows connections to the site itself, so the page cannot send a file to any other server, even by mistake.
+- **Test it.** Load the page, switch to airplane mode, and compress a file. It still works. Or watch the Network tab while you pick a file: nothing is sent.
+- **Read it.** The code is small. `grep -rn "fetch(\|XMLHttpRequest\|sendBeacon\|WebSocket" src/` finds nothing.
+- Nothing is saved: no cookies, localStorage or IndexedDB. Closing the tab clears everything from memory.
+
+Limits worth knowing: you are trusting that the code Vercel serves matches this repo (self-hosting from this repo removes that), and that your own device and browser extensions are clean. The deployed site also uses Vercel Web Analytics, which counts page views only (no cookies, nothing about your files). It is a single script tag in `index.html`; delete it to run with no analytics at all.

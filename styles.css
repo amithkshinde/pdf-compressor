@@ -62,3 +62,8 @@ footer { text-align:center; }
 .verdict li.fail::before { content:"\2715"; color:var(--bad); }
 .verdict li.note::before { content:"i"; color:var(--muted); }
 @media (max-width:380px) { h1 { font-size:1.9rem; } }
+.privacy { text-align:left; margin:8px 0 0; }
+.privacy summary { justify-content:center; font-size:.875rem; }
+.privacy ul { margin:8px 0 0; padding-left:1.2em; font-size:.875rem; color:var(--muted); }
+.privacy li { margin:6px 0; }
+footer p { margin:0; }

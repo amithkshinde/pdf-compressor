@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Fit to size</title>
   <link rel="stylesheet" href="styles.css">
-  <script>window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };</script>
   <script defer src="/_vercel/insights/script.js"></script>
 </head>
 <body>
@@ -81,7 +80,19 @@
       </div>
     </section>
 
-    <footer class="muted">No upload · No account · Nothing stored</footer>
+    <footer class="muted">
+      <p>No upload · No account · Nothing stored</p>
+      <details class="privacy">
+        <summary>How can I be sure my file stays private?</summary>
+        <ul>
+          <li>Your file is read and shrunk by code running in this browser tab. The app has no server that could receive it.</li>
+          <li>The page tells your browser to block every connection except to this site, so even a bug couldn't send a file elsewhere.</li>
+          <li>Check it yourself: turn on airplane mode after the page loads and it still works. Or open your browser's Network tab and watch: nothing is sent when you pick a file.</li>
+          <li>The code is open: github.com/amithkshinde/pdf-compressor</li>
+          <li>The only thing measured is how many people visit the page, never anything about files.</li>
+        </ul>
+      </details>
+    </footer>
   </main>
   <script type="module" src="src/app.js"></script>
 </body>

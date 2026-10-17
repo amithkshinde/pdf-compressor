@@ -124,7 +124,7 @@ function pdfjs() {
 
 export async function openForRender(srcBytes) {
   const lib = await pdfjs();
-  return lib.getDocument({ data: srcBytes.slice() }).promise;
+  return lib.getDocument({ data: srcBytes.slice(), isEvalSupported: false }).promise;
 }
 
 /** Render page 1 to a small JPEG blob for the before/after preview. */
